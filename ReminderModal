@@ -1,0 +1,136 @@
+import React, { useState } from "react";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Bell, Clock } from "lucide-react";
+import { format } from "date-fns";
+
+export default function ReminderModal({ isOpen, onClose, onSave, currentReminder }) {
+  const [selectedDate, setSelectedDate] = useState(
+    currentReminder
+      ? format(new Date(currentReminder), "yyyy-MM-dd")
+      : format(new Date(), "yyyy-MM-dd")
+  );
+  const [selectedTime, setSelectedTime] = useState(
+    currentReminder
+      ? format(new Date(currentReminder), "HH:mm")
+      : "09:00"
+  );
+
+  const handleSave = () => {
+    const reminderDateTime = new Date(`${selectedDate}T${selectedTime}`);
+    onSave(reminderDateTime.toISOString());
+  };
+
+  const quickOptions = [
+    { label: "In 1 hour", minutes: 60 },
+    { label: "In 3 hours", minutes: 180 },
+    { label: "Tomorrow", hours: 24 },
+  ];
+
+  const setQuickReminder = (minutes = 0, hours = 0) => {
+    const now = new Date();
+    now.setMinutes(now.getMinutes() + minutes);
+    now.setHours(now.getHours() + hours);
+    setSelectedDate(format(now, "yyyy-MM-dd"));
+    setSelectedTime(format(now, "HH:mm"));
+  };
+
+  return (
+    <Dialog open={isOpen} onOpenChange={onClose}>
+      <DialogContent className="sm:max-w-md rounded-3xl">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-xl">
+            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center">
+              <Bell className="w-5 h-5 text-white" />
+            </div>
+            Set Reminder
+          </DialogTitle>
+        </DialogHeader>
+
+        <div className="space-y-6 py-4">
+          {/* Quick Options */}
+          <div className="space-y-2">
+            <Label className="text-sm font-medium text-gray-700">Quick Options</Label>
+            <div className="grid grid-cols-3 gap-2">
+              {quickOptions.map((option) => (
+                <Button
+                  key={option.label}
+                  variant="outline"
+                  onClick={() => setQuickReminder(option.minutes, option.hours)}
+                  className="rounded-xl border-2 border-indigo-100 hover:bg-indigo-50 hover:border-indigo-200"
+                >
+                  {option.label}
+                </Button>
+              ))}
+            </div>
+          </div>
+
+          {/* Custom Date & Time */}
+          <div className="space-y-4">
+            <Label className="text-sm font-medium text-gray-700">Custom Date & Time</Label>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="date" className="text-xs text-gray-500">Date</Label>
+                <Input
+                  id="date"
+                  type="date"
+                  value={selectedDate}
+                  onChange={(e) => setSelectedDate(e.target.value)}
+                  className="rounded-xl border-2 border-indigo-100 focus:border-indigo-300"
+                  min={format(new Date(), "yyyy-MM-dd")}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="time" className="text-xs text-gray-500">Time</Label>
+                <Input
+                  id="time"
+                  type="time"
+                  value={selectedTime}
+                  onChange={(e) => setSelectedTime(e.target.value)}
+                  className="rounded-xl border-2 border-indigo-100 focus:border-indigo-300"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Preview */}
+          <div className="p-4 rounded-xl bg-gradient-to-r from-indigo-50 to-purple-50 border-2 border-indigo-100">
+            <div className="flex items-center gap-2 text-sm">
+              <Clock className="w-4 h-4 text-indigo-600" />
+              <span className="text-gray-700">
+                Remind me on{" "}
+                <strong className="text-indigo-700">
+                  {format(new Date(`${selectedDate}T${selectedTime}`), "MMM d, yyyy 'at' h:mm a")}
+                </strong>
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <DialogFooter className="gap-2">
+          <Button
+            variant="outline"
+            onClick={onClose}
+            className="rounded-xl border-2 border-gray-200"
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={handleSave}
+            className="rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700"
+          >
+            Set Reminder
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
