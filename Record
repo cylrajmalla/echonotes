@@ -1,0 +1,363 @@
+import React, { useState, useRef, useEffect } from "react";
+import { base44 } from "@/api/base44Client";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "react-router-dom";
+import { createPageUrl } from "@/utils";
+import { Mic, Square, Play, Pause, Save, Trash2, Loader2, FileText } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Card } from "@/components/ui/card";
+import { motion, AnimatePresence } from "framer-motion";
+
+export default function Record() {
+  const [isRecording, setIsRecording] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
+  const [audioURL, setAudioURL] = useState(null);
+  const [audioBlob, setAudioBlob] = useState(null);
+  const [duration, setDuration] = useState(0);
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [transcript, setTranscript] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
+  const [recordingTime, setRecordingTime] = useState(0);
+  
+  const mediaRecorderRef = useRef(null);
+  const chunksRef = useRef([]);
+  const timerRef = useRef(null);
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+
+  const createNoteMutation = useMutation({
+    mutationFn: (noteData) => base44.entities.Note.create(noteData),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["notes"] });
+      navigate(createPageUrl("Notes"));
+    },
+  });
+
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+      }
+    };
+  }, []);
+
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
+      chunksRef.current = [];
+
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) {
+          chunksRef.current.push(e.data);
+        }
+      };
+
+      mediaRecorder.onstop = async () => {
+        const blob = new Blob(chunksRef.current, { type: "audio/webm" });
+        const url = URL.createObjectURL(blob);
+        setAudioURL(url);
+        setAudioBlob(blob);
+        setDuration(recordingTime);
+        stream.getTracks().forEach((track) => track.stop());
+        
+        // Auto-transcribe after recording
+        await transcribeAudio(blob);
+      };
+
+      mediaRecorder.start();
+      setIsRecording(true);
+      setRecordingTime(0);
+
+      timerRef.current = setInterval(() => {
+        setRecordingTime((prev) => prev + 1);
+      }, 1000);
+    } catch (error) {
+      console.error("Error accessing microphone:", error);
+      alert("Could not access microphone. Please grant permission.");
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
+      setIsPaused(false);
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+      }
+    }
+  };
+
+  const pauseRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      if (isPaused) {
+        mediaRecorderRef.current.resume();
+        timerRef.current = setInterval(() => {
+          setRecordingTime((prev) => prev + 1);
+        }, 1000);
+      } else {
+        mediaRecorderRef.current.pause();
+        if (timerRef.current) {
+          clearInterval(timerRef.current);
+        }
+      }
+      setIsPaused(!isPaused);
+    }
+  };
+
+  const transcribeAudio = async (blob) => {
+    setIsTranscribing(true);
+    try {
+      // Upload audio file first
+      const file = new File([blob], `audio-${Date.now()}.webm`, {
+        type: "audio/webm",
+      });
+      
+      const { file_url } = await base44.integrations.Core.UploadFile({ file });
+      
+      // Use LLM to transcribe the audio
+      const result = await base44.integrations.Core.InvokeLLM({
+        prompt: "Please transcribe the audio file accurately. Only provide the transcription text, nothing else.",
+        file_urls: [file_url]
+      });
+      
+      setTranscript(result);
+      // Auto-fill title with first few words if not set
+      if (!title && result) {
+        const firstWords = result.split(' ').slice(0, 5).join(' ');
+        setTitle(firstWords + (result.split(' ').length > 5 ? '...' : ''));
+      }
+    } catch (error) {
+      console.error("Error transcribing audio:", error);
+      setTranscript("Transcription failed. Please try again or add notes manually.");
+    } finally {
+      setIsTranscribing(false);
+    }
+  };
+
+  const discardRecording = () => {
+    setAudioURL(null);
+    setAudioBlob(null);
+    setDuration(0);
+    setRecordingTime(0);
+    setTitle("");
+    setDescription("");
+    setTranscript("");
+  };
+
+  const saveRecording = async () => {
+    if (!audioBlob || !title.trim()) {
+      alert("Please add a title for your note");
+      return;
+    }
+
+    setIsSaving(true);
+
+    try {
+      const file = new File([audioBlob], `recording-${Date.now()}.webm`, {
+        type: "audio/webm",
+      });
+
+      const { file_url } = await base44.integrations.Core.UploadFile({ file });
+
+      await createNoteMutation.mutateAsync({
+        title: title.trim(),
+        description: description.trim(),
+        transcript: transcript.trim(),
+        audio_url: file_url,
+        duration: duration,
+      });
+    } catch (error) {
+      console.error("Error saving note:", error);
+      alert("Failed to save note. Please try again.");
+      setIsSaving(false);
+    }
+  };
+
+  const formatTime = (seconds) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+  };
+
+  return (
+    <div className="max-w-2xl mx-auto px-4 py-6">
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="space-y-6"
+      >
+        {/* Recording Interface */}
+        <Card className="p-8 bg-white/80 backdrop-blur-sm border-2 border-indigo-100 rounded-3xl shadow-xl">
+          <div className="text-center">
+            {/* Timer */}
+            <motion.div
+              className="mb-8"
+              animate={{ scale: isRecording ? [1, 1.05, 1] : 1 }}
+              transition={{ repeat: isRecording ? Infinity : 0, duration: 1.5 }}
+            >
+              <div className="text-6xl font-bold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent mb-2">
+                {formatTime(recordingTime)}
+              </div>
+              <p className="text-gray-500 text-sm">
+                {isRecording ? (isPaused ? "Paused" : "Recording...") : audioURL ? "Recording Complete" : "Ready to Record"}
+              </p>
+            </motion.div>
+
+            {/* Recording Button */}
+            {!audioURL && (
+              <div className="flex justify-center gap-4 mb-6">
+                {!isRecording ? (
+                  <Button
+                    onClick={startRecording}
+                    className="w-24 h-24 rounded-full bg-gradient-to-br from-red-500 to-pink-600 hover:from-red-600 hover:to-pink-700 shadow-2xl"
+                  >
+                    <Mic className="w-10 h-10 text-white" />
+                  </Button>
+                ) : (
+                  <>
+                    <Button
+                      onClick={pauseRecording}
+                      className="w-20 h-20 rounded-full bg-gradient-to-br from-yellow-500 to-orange-500 hover:from-yellow-600 hover:to-orange-600 shadow-xl"
+                    >
+                      {isPaused ? (
+                        <Play className="w-8 h-8 text-white" />
+                      ) : (
+                        <Pause className="w-8 h-8 text-white" />
+                      )}
+                    </Button>
+                    <Button
+                      onClick={stopRecording}
+                      className="w-24 h-24 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 shadow-2xl"
+                    >
+                      <Square className="w-10 h-10 text-white" />
+                    </Button>
+                  </>
+                )}
+              </div>
+            )}
+
+            {/* Audio Playback */}
+            {audioURL && (
+              <motion.div
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="mb-6"
+              >
+                <div className="bg-gradient-to-r from-indigo-50 to-purple-50 rounded-2xl p-6">
+                  <audio src={audioURL} controls className="w-full" />
+                </div>
+              </motion.div>
+            )}
+
+            {/* Transcribing Indicator */}
+            {isTranscribing && (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                className="flex items-center justify-center gap-2 text-indigo-600 mb-4"
+              >
+                <Loader2 className="w-5 h-5 animate-spin" />
+                <span className="text-sm font-medium">Transcribing your audio...</span>
+              </motion.div>
+            )}
+          </div>
+        </Card>
+
+        {/* Note Details */}
+        <AnimatePresence>
+          {audioURL && (
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+            >
+              <Card className="p-6 bg-white/80 backdrop-blur-sm border-2 border-indigo-100 rounded-3xl shadow-xl">
+                <h3 className="text-lg font-semibold mb-4 text-gray-800">Note Details</h3>
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Title *
+                    </label>
+                    <Input
+                      value={title}
+                      onChange={(e) => setTitle(e.target.value)}
+                      placeholder="Give your note a title..."
+                      className="rounded-xl border-2 border-indigo-100 focus:border-indigo-300"
+                    />
+                  </div>
+
+                  {/* Transcript */}
+                  {transcript && (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-2">
+                        <FileText className="w-4 h-4" />
+                        Transcript (Auto-generated)
+                      </label>
+                      <Textarea
+                        value={transcript}
+                        onChange={(e) => setTranscript(e.target.value)}
+                        placeholder="Transcript will appear here..."
+                        rows={6}
+                        className="rounded-xl border-2 border-green-100 focus:border-green-300 bg-green-50/30"
+                      />
+                    </div>
+                  )}
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Additional Notes (Optional)
+                    </label>
+                    <Textarea
+                      value={description}
+                      onChange={(e) => setDescription(e.target.value)}
+                      placeholder="Add any additional notes or context..."
+                      rows={4}
+                      className="rounded-xl border-2 border-indigo-100 focus:border-indigo-300"
+                    />
+                  </div>
+                </div>
+
+                {/* Action Buttons */}
+                <div className="flex gap-3 mt-6">
+                  <Button
+                    onClick={discardRecording}
+                    variant="outline"
+                    className="flex-1 rounded-xl border-2 border-gray-200 hover:bg-gray-50"
+                    disabled={isSaving || isTranscribing}
+                  >
+                    <Trash2 className="w-4 h-4 mr-2" />
+                    Discard
+                  </Button>
+                  <Button
+                    onClick={saveRecording}
+                    className="flex-1 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 shadow-lg"
+                    disabled={isSaving || isTranscribing}
+                  >
+                    {isSaving ? (
+                      <>
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        Saving...
+                      </>
+                    ) : (
+                      <>
+                        <Save className="w-4 h-4 mr-2" />
+                        Save Note
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </Card>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </motion.div>
+    </div>
+  );
+}
