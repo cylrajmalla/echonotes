@@ -1,0 +1,46 @@
+{
+  "name": "Note",
+  "type": "object",
+  "properties": {
+    "title": {
+      "type": "string",
+      "description": "Title of the note"
+    },
+    "description": {
+      "type": "string",
+      "description": "Text description or transcript"
+    },
+    "transcript": {
+      "type": "string",
+      "description": "Auto-generated transcript of the audio"
+    },
+    "audio_url": {
+      "type": "string",
+      "description": "URL of the recorded audio file"
+    },
+    "duration": {
+      "type": "number",
+      "description": "Duration of recording in seconds"
+    },
+    "reminder_time": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When to be reminded about this note"
+    },
+    "is_reminder_active": {
+      "type": "boolean",
+      "default": false,
+      "description": "Whether reminder is active"
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Tags for organizing notes"
+    }
+  },
+  "required": [
+    "title"
+  ]
+}
