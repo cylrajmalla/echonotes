@@ -1,0 +1,208 @@
+import React, { useState, useEffect } from "react";
+import { base44 } from "@/api/base44Client";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Link } from "react-router-dom";
+import { createPageUrl } from "@/utils";
+import { Search, Clock, Mic, Play, Trash2, Bell, BellOff } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { motion, AnimatePresence } from "framer-motion";
+import NoteCard from "../components/notes/NoteCard";
+import ReminderModal from "../components/notes/ReminderModal";
+
+export default function Notes() {
+  const [searchQuery, setSearchQuery] = useState("");
+  const [selectedNote, setSelectedNote] = useState(null);
+  const [showReminderModal, setShowReminderModal] = useState(false);
+  const queryClient = useQueryClient();
+
+  const { data: notes = [], isLoading } = useQuery({
+    queryKey: ["notes"],
+    queryFn: () => base44.entities.Note.list("-created_date"),
+    initialData: [],
+  });
+
+  const deleteNoteMutation = useMutation({
+    mutationFn: (id) => base44.entities.Note.delete(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["notes"] });
+    },
+  });
+
+  const updateNoteMutation = useMutation({
+    mutationFn: ({ id, data }) => base44.entities.Note.update(id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["notes"] });
+    },
+  });
+
+  const filteredNotes = notes.filter((note) =>
+    note.title?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    note.description?.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  const handleSetReminder = (note) => {
+    setSelectedNote(note);
+    setShowReminderModal(true);
+  };
+
+  const handleSaveReminder = (reminderTime) => {
+    if (selectedNote) {
+      updateNoteMutation.mutate({
+        id: selectedNote.id,
+        data: {
+          reminder_time: reminderTime,
+          is_reminder_active: true,
+        },
+      });
+    }
+    setShowReminderModal(false);
+    setSelectedNote(null);
+  };
+
+  const handleToggleReminder = (note) => {
+    updateNoteMutation.mutate({
+      id: note.id,
+      data: {
+        is_reminder_active: !note.is_reminder_active,
+      },
+    });
+  };
+
+  // Check reminders
+  useEffect(() => {
+    const interval = setInterval(() => {
+      notes.forEach((note) => {
+        if (note.is_reminder_active && note.reminder_time) {
+          const reminderDate = new Date(note.reminder_time);
+          const now = new Date();
+          if (reminderDate <= now) {
+            // Show notification
+            if ("Notification" in window && Notification.permission === "granted") {
+              new Notification("Voice Note Reminder", {
+                body: note.title,
+                icon: "/icon.png",
+              });
+            }
+            // Deactivate reminder
+            updateNoteMutation.mutate({
+              id: note.id,
+              data: { is_reminder_active: false },
+            });
+          }
+        }
+      });
+    }, 10000); // Check every 10 seconds
+
+    // Request notification permission
+    if ("Notification" in window && Notification.permission === "default") {
+      Notification.requestPermission();
+    }
+
+    return () => clearInterval(interval);
+  }, [notes]);
+
+  return (
+    <div className="max-w-2xl mx-auto px-4 py-6">
+      {/* Search Bar */}
+      <motion.div
+        initial={{ opacity: 0, y: -20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="mb-6"
+      >
+        <div className="relative">
+          <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
+          <Input
+            placeholder="Search your notes..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="pl-12 py-6 rounded-2xl border-2 border-indigo-100 focus:border-indigo-300 bg-white/80 backdrop-blur-sm"
+          />
+        </div>
+      </motion.div>
+
+      {/* Stats */}
+      <div className="grid grid-cols-2 gap-4 mb-6">
+        <motion.div
+          initial={{ opacity: 0, scale: 0.9 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="bg-gradient-to-br from-indigo-500 to-indigo-600 rounded-2xl p-4 text-white shadow-lg"
+        >
+          <Mic className="w-6 h-6 mb-2 opacity-80" />
+          <p className="text-2xl font-bold">{notes.length}</p>
+          <p className="text-sm opacity-90">Total Notes</p>
+        </motion.div>
+        <motion.div
+          initial={{ opacity: 0, scale: 0.9 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ delay: 0.1 }}
+          className="bg-gradient-to-br from-purple-500 to-pink-500 rounded-2xl p-4 text-white shadow-lg"
+        >
+          <Bell className="w-6 h-6 mb-2 opacity-80" />
+          <p className="text-2xl font-bold">
+            {notes.filter((n) => n.is_reminder_active).length}
+          </p>
+          <p className="text-sm opacity-90">Active Reminders</p>
+        </motion.div>
+      </div>
+
+      {/* Notes List */}
+      {isLoading ? (
+        <div className="flex justify-center py-12">
+          <div className="w-12 h-12 rounded-full border-4 border-indigo-200 border-t-indigo-600 animate-spin" />
+        </div>
+      ) : filteredNotes.length === 0 ? (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          className="text-center py-12"
+        >
+          <div className="w-20 h-20 mx-auto mb-4 rounded-full bg-gradient-to-br from-indigo-100 to-purple-100 flex items-center justify-center">
+            <Mic className="w-10 h-10 text-indigo-400" />
+          </div>
+          <h3 className="text-xl font-semibold text-gray-700 mb-2">
+            {searchQuery ? "No notes found" : "No voice notes yet"}
+          </h3>
+          <p className="text-gray-500 mb-6">
+            {searchQuery ? "Try a different search" : "Tap the Record button to create your first note"}
+          </p>
+          {!searchQuery && (
+            <Link to={createPageUrl("Record")}>
+              <Button className="bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 rounded-full px-8">
+                Start Recording
+              </Button>
+            </Link>
+          )}
+        </motion.div>
+      ) : (
+        <div className="space-y-4">
+          <AnimatePresence>
+            {filteredNotes.map((note, index) => (
+              <NoteCard
+                key={note.id}
+                note={note}
+                index={index}
+                onDelete={() => deleteNoteMutation.mutate(note.id)}
+                onSetReminder={() => handleSetReminder(note)}
+                onToggleReminder={() => handleToggleReminder(note)}
+              />
+            ))}
+          </AnimatePresence>
+        </div>
+      )}
+
+      {/* Reminder Modal */}
+      {showReminderModal && (
+        <ReminderModal
+          isOpen={showReminderModal}
+          onClose={() => {
+            setShowReminderModal(false);
+            setSelectedNote(null);
+          }}
+          onSave={handleSaveReminder}
+          currentReminder={selectedNote?.reminder_time}
+        />
+      )}
+    </div>
+  );
+}
